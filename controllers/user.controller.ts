@@ -7,9 +7,13 @@ import jwt, { JwtPayload, Secret } from "jsonwebtoken";
 import ejs from "ejs";
 import path from "path";
 import sendMail from "../utils/sendMail";
-import { accessTokenOptions, refreshTokenOptions, sendToken } from "../utils/jwt";
+import {
+  accessTokenOptions,
+  refreshTokenOptions,
+  sendToken,
+} from "../utils/jwt";
 import { redis } from "../utils/redis";
-import { getUserById } from "../services/user.service";
+import { getAllUsersService, getUserById, updateUserRoleService } from "../services/user.service";
 import cloudinary from "cloudinary";
 
 // register user
@@ -130,104 +134,108 @@ export const activateUser = CatchAsyncError(
   }
 );
 
-// Login user 
+// Login user
 interface ILoginRequest {
   email: string;
   password: string;
-};
+}
 
-export const loginUser = CatchAsyncError(async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { email, password } = req.body as ILoginRequest;
-    if (!email || !password) {
-      return next(new ErrorHandler("Please enter email and password", 400));
-    };
+export const loginUser = CatchAsyncError(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, password } = req.body as ILoginRequest;
+      if (!email || !password) {
+        return next(new ErrorHandler("Please enter email and password", 400));
+      }
 
-    const user = await userModel.findOne({ email }).select("+password");
-    if (!user) {
-      return next(new ErrorHandler("Invalid email or password", 400));
+      const user = await userModel.findOne({ email }).select("+password");
+      if (!user) {
+        return next(new ErrorHandler("Invalid email or password", 400));
+      }
+
+      const isPasswordMatch = await user.comparePassword(password);
+      if (!isPasswordMatch) {
+        return next(new ErrorHandler("Invalid email or password", 400));
+      }
+
+      sendToken(user, 200, res);
+    } catch (error: any) {
+      return next(new ErrorHandler(error.message, 400));
     }
-
-    const isPasswordMatch = await user.comparePassword(password);
-    if (!isPasswordMatch) {
-      return next(new ErrorHandler("Invalid email or password", 400))
-    }
-
-    sendToken(user, 200, res);
-
-  } catch (error: any) {
-    return next(new ErrorHandler(error.message, 400));
   }
-});
+);
 
-// Log out 
-export const logoutUser = CatchAsyncError(async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    res.cookie("access_token", "", { maxAge: 1 });
-    res.cookie("refresh_token", "", { maxAge: 1 });
+// Log out
+export const logoutUser = CatchAsyncError(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.cookie("access_token", "", { maxAge: 1 });
+      res.cookie("refresh_token", "", { maxAge: 1 });
 
-    const userId = req.user?._id || '';
-    redis.del(userId);
+      const userId = req.user?._id || "";
+      redis.del(userId);
 
-    res.status(200).json({
-      success: true,
-      message: "Logged out successfully",
-    });
-  } catch (error: any) {
-    return next(new ErrorHandler(error.message, 400));
-  }
-});
-
-// update access token 
-export const updateAccessToken = CatchAsyncError(async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const refresh_token = req.cookies.refresh_token as string;
-    const decoded = jwt.verify(
-      refresh_token,
-      process.env.REFRESH_TOKEN as string
-    ) as JwtPayload;
-    const message = "Could not refresh token";
-    if (!decoded) {
-      return next(new ErrorHandler(message, 400));
+      res.status(200).json({
+        success: true,
+        message: "Logged out successfully",
+      });
+    } catch (error: any) {
+      return next(new ErrorHandler(error.message, 400));
     }
-    const session = await redis.get(decoded.id as string);
+  }
+);
 
-    if (!session) {
-      return next(
-        new ErrorHandler("Please login for access this resources!", 400)
+// update access token
+export const updateAccessToken = CatchAsyncError(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const refresh_token = req.cookies.refresh_token as string;
+      const decoded = jwt.verify(
+        refresh_token,
+        process.env.REFRESH_TOKEN as string
+      ) as JwtPayload;
+      const message = "Could not refresh token";
+      if (!decoded) {
+        return next(new ErrorHandler(message, 400));
+      }
+      const session = await redis.get(decoded.id as string);
+
+      if (!session) {
+        return next(
+          new ErrorHandler("Please login for access this resources!", 400)
+        );
+      }
+
+      const user = JSON.parse(session);
+
+      const accessToken = jwt.sign(
+        { id: user._id },
+        process.env.ACCESS_TOKEN as string,
+        {
+          expiresIn: "5m",
+        }
       );
+
+      const refreshToken = jwt.sign(
+        { id: user._id },
+        process.env.REFRESH_TOKEN as string,
+        {
+          expiresIn: "3d",
+        }
+      );
+      req.user = user;
+      res.cookie("access_token", accessToken, accessTokenOptions);
+      res.cookie("refresh_token", refreshToken, refreshTokenOptions);
+
+      res.status(200).json({
+        status: "success",
+        accessToken,
+      });
+    } catch (error: any) {
+      return next(new ErrorHandler(error.message, 400));
     }
-
-    const user = JSON.parse(session);
-
-    const accessToken = jwt.sign(
-      { id: user._id },
-      process.env.ACCESS_TOKEN as string,
-      {
-        expiresIn: "5m",
-      }
-    );
-
-    const refreshToken = jwt.sign(
-      { id: user._id },
-      process.env.REFRESH_TOKEN as string,
-      {
-        expiresIn: "3d",
-      }
-    );
-    req.user = user;
-    res.cookie("access_token", accessToken, accessTokenOptions);
-    res.cookie("refresh_token", refreshToken, refreshTokenOptions);
-
-    res.status(200).json({
-      status: "success",
-      accessToken,
-    });
-
-  } catch (error: any) {
-    return next(new ErrorHandler(error.message, 400));
   }
-});
+);
 
 // get user info
 export const getUserInfo = CatchAsyncError(
@@ -265,7 +273,7 @@ export const socialAuth = CatchAsyncError(
   }
 );
 
-// update user info 
+// update user info
 interface IUpdateUserInfo {
   name?: string;
   email?: string;
@@ -393,3 +401,45 @@ export const updateProfilePicture = CatchAsyncError(
     }
   }
 );
+
+// get all users -- only admin
+export const getAllUsers = CatchAsyncError(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      getAllUsersService(res);
+    } catch (error: any) {
+      return next(new ErrorHandler(error.message, 500));
+    }
+  }
+);
+
+// update user role -- only for admin 
+export const updateUserRole = CatchAsyncError(async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const {id, role} = req.body;
+    updateUserRoleService(res, id, role);
+  } catch (error: any) {
+    return next(new ErrorHandler(error.message, 500));
+  }
+});
+
+// delete user role -- only for admin
+export const  deleteUser = CatchAsyncError(async (req: Request, res: Response, next:NextFunction) => {
+  try {
+    const {id} = req.params;
+    const user = await userModel.findById(id);
+    if (!user) {
+      return next(new ErrorHandler("User not found", 404));
+    }
+    await user.deleteOne({id});
+    await redis.del(id);
+
+    res.status(200).json({
+      success: true,
+      message: "User deleted successfully"
+    });
+
+  } catch (error: any) {
+    return next(new ErrorHandler(error.message, 500));
+  }
+});
