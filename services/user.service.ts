@@ -18,7 +18,7 @@ export const getUserById = async (id: string, res: Response) => {
 
 // get all user 
 export const getAllUsersService = async (res: Response) => {
-    const users = userModel.find().sort({ createAt: -1 });
+    const users = await userModel.find().sort({ createAt: -1 });
 
     res.status(201).json({
         success: true,
