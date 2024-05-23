@@ -212,7 +212,7 @@ export const updateAccessToken = CatchAsyncError(
         { id: user._id },
         process.env.ACCESS_TOKEN as string,
         {
-          expiresIn: "5m",
+          expiresIn: "5h",
         }
       );
 
@@ -415,15 +415,26 @@ export const getAllUsers = CatchAsyncError(
   }
 );
 
-// update user role -- only for admin 
-export const updateUserRole = CatchAsyncError(async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const {id, role} = req.body;
-    updateUserRoleService(res, id, role);
-  } catch (error: any) {
-    return next(new ErrorHandler(error.message, 500));
+// update user role --- only for admin
+export const updateUserRole = CatchAsyncError(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, role } = req.body;
+      const isUserExist = await userModel.findOne({ email });
+      if (isUserExist) {
+        const id = isUserExist._id;
+        updateUserRoleService(res,id, role);
+      } else {
+        res.status(400).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+    } catch (error: any) {
+      return next(new ErrorHandler(error.message, 400));
+    }
   }
-});
+);
 
 // delete user role -- only for admin
 export const  deleteUser = CatchAsyncError(async (req: Request, res: Response, next:NextFunction) => {
