@@ -3,7 +3,7 @@ import { CatchAsyncError } from "../middleware/catchAsyncErrors";
 import ErrorHandler from "../utils/ErrorHandler";
 import OrderModel, { IOrder } from "../models/orderModel";
 import userModel from "../models/user.model";
-import CourseModel from "../models/course.model";
+import CourseModel, { ICourse } from "../models/course.model";
 import path from "path";
 import ejs from "ejs";
 import sendMail from "../utils/sendMail";
@@ -17,6 +17,7 @@ export const createOrder = CatchAsyncError(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { courseId, payment_info } = req.body as IOrder;
+
       if (payment_info) {
         if ("id" in payment_info) {
           const paymentIntentId = payment_info.id;
@@ -29,7 +30,9 @@ export const createOrder = CatchAsyncError(
           }
         }
       }
+
       const user = await userModel.findById(req.user?._id);
+
       const courseExistInUser = user?.courses.some(
         (course: any) => course._id.toString() === courseId
       );
@@ -40,7 +43,7 @@ export const createOrder = CatchAsyncError(
         );
       }
 
-      const course = await CourseModel.findById(courseId);
+      const course:ICourse | null = await CourseModel.findById(courseId);
 
       if (!course) {
         return next(new ErrorHandler("Course not found", 404));
@@ -57,7 +60,7 @@ export const createOrder = CatchAsyncError(
           _id: course._id.toString().slice(0, 6),
           name: course.name,
           price: course.price,
-          date: new Date().toLocaleDateString("vi-VN", {
+          date: new Date().toLocaleDateString("en-US", {
             year: "numeric",
             month: "long",
             day: "numeric",
@@ -69,6 +72,7 @@ export const createOrder = CatchAsyncError(
         path.join(__dirname, "../mails/order-confirmation.ejs"),
         { order: mailData }
       );
+
       try {
         if (user) {
           await sendMail({
@@ -94,7 +98,7 @@ export const createOrder = CatchAsyncError(
         message: `You have a new order from ${course?.name}`,
       });
 
-      course.purchased ? (course.purchased += 1) : course.purchased;
+      course.purchased = course.purchased + 1;
 
       await course.save();
 
